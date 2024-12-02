@@ -34,4 +34,7 @@ pub const ApiError = error{
     CoinNotFound,
     JsonParsingFailed,
     OutOfMemory,
+    RateLimitExceeded,
+    EmptyResponse,
+    CurlInitFailed,
 };

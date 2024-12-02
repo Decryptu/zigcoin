@@ -9,7 +9,8 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Get stdout
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.io.getStdOut();
+    const stdout = stdout_file.writer();
 
     // Initialize API client
     var client = try api.ApiClient.init(allocator);
@@ -32,9 +33,5 @@ pub fn main() !void {
     const coin_info = try client.fetchCoinInfo(coin_id);
     defer coin_info.deinit(allocator);
 
-    try display.displayCoinInfo(stdout, coin_info);
-}
-
-test "basic functionality" {
-    // Add tests here
+    try display.displayCoinInfo(allocator, stdout, coin_info);
 }

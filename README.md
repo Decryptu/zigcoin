@@ -2,6 +2,8 @@
 
 A fast and minimal CLI cryptocurrency information tool written in Zig, using the CoinGecko API v3.
 
+![ZigCoin Output Example](img/result.png)
+
 ## Features
 
 - Fetch real-time cryptocurrency price data
@@ -11,7 +13,7 @@ A fast and minimal CLI cryptocurrency information tool written in Zig, using the
   - 24h volume
   - Price changes
   - Supply information
-- Clean and colorful CLI output
+- Clean and minimal CLI output
 - Zero configuration needed
 
 ## Prerequisites
@@ -42,27 +44,35 @@ zig build
 ## Running
 
 ```bash
+./zig-out/bin/zigcoin <coin-id>
+```
+
+Examples:
+
+```bash
 ./zig-out/bin/zigcoin bitcoin
+./zig-out/bin/zigcoin ethereum
+./zig-out/bin/zigcoin dogecoin
 ```
 
-## Example Output
+## Error Handling
 
-```
-Bitcoin (BTC)
-=============
-Price: $45,000.00
-Market Cap: $800,000,000,000.00
-24h Volume: $24,000,000,000.00
-24h Change: 2.50%
-Market Cap Rank: #1
+The tool provides clear error messages for common issues:
 
-Supply
-======
-Circulating: 19,000,000
-Total: 21,000,000
-Max: 21,000,000
+- Invalid coin ID
+- Network request failures
+- API rate limiting
+- Missing data
 
-Last Updated: 2024-01-01T00:00:00Z
+## Project Structure
+
+```bash
+src/
+├── main.zig    - Entry point and argument handling
+├── api.zig     - CoinGecko API client implementation
+├── types.zig   - Data structures and types
+├── json.zig    - JSON response parsing
+└── display.zig - Output formatting and display
 ```
 
 ## Contributing
@@ -80,4 +90,11 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - CoinGecko API for providing the cryptocurrency data
-- Zig community for the amazing programming language
+- Zig community
+- libcurl for HTTP requests
+
+## Known Limitations
+
+- Currently only supports single coin queries
+- Requires internet connection
+- Subject to CoinGecko API rate limits

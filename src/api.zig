@@ -7,6 +7,15 @@ const c = @cImport({
 
 const BASE_URL = "https://api.coingecko.com/api/v3";
 
+pub const ApiError = error{
+    CurlInitFailed,
+    CurlSetupFailed,
+    RequestFailed,
+    RateLimitExceeded,
+    CoinNotFound,
+    EmptyResponse,
+};
+
 pub const ApiClient = struct {
     allocator: std.mem.Allocator,
     curl: *c.CURL,
@@ -15,17 +24,22 @@ pub const ApiClient = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) !Self {
-        const curl = c.curl_easy_init() orelse return error.CurlInitFailed;
+        const curl = c.curl_easy_init() orelse return ApiError.CurlInitFailed;
+        errdefer c.curl_easy_cleanup(curl);
 
         // Set up headers
-        var headers = c.curl_slist_append(null, "Accept: application/json") orelse return error.CurlInitFailed;
-        headers = c.curl_slist_append(headers, "User-Agent: Zigcoin/1.0") orelse return error.CurlInitFailed;
+        var headers = c.curl_slist_append(null, "Accept: application/json") orelse return ApiError.CurlInitFailed;
+        errdefer c.curl_slist_free_all(headers);
+        headers = c.curl_slist_append(headers, "User-Agent: Zigcoin/1.0") orelse {
+            c.curl_slist_free_all(headers);
+            return ApiError.CurlInitFailed;
+        };
 
-        // Configure CURL
-        _ = c.curl_easy_setopt(curl, c.CURLOPT_HTTPHEADER, headers);
-        _ = c.curl_easy_setopt(curl, c.CURLOPT_SSL_VERIFYPEER, @as(c_long, 1));
-        _ = c.curl_easy_setopt(curl, c.CURLOPT_TIMEOUT, @as(c_long, 10)); // 10 second timeout
-        _ = c.curl_easy_setopt(curl, c.CURLOPT_FOLLOWLOCATION, @as(c_long, 1));
+        // Configure CURL with error checking
+        if (c.curl_easy_setopt(curl, c.CURLOPT_HTTPHEADER, headers) != c.CURLE_OK) return ApiError.CurlSetupFailed;
+        if (c.curl_easy_setopt(curl, c.CURLOPT_SSL_VERIFYPEER, @as(c_long, 1)) != c.CURLE_OK) return ApiError.CurlSetupFailed;
+        if (c.curl_easy_setopt(curl, c.CURLOPT_TIMEOUT, @as(c_long, 10)) != c.CURLE_OK) return ApiError.CurlSetupFailed;
+        if (c.curl_easy_setopt(curl, c.CURLOPT_FOLLOWLOCATION, @as(c_long, 1)) != c.CURLE_OK) return ApiError.CurlSetupFailed;
 
         return Self{
             .allocator = allocator,
@@ -41,38 +55,30 @@ pub const ApiClient = struct {
 
     pub fn fetchCoinInfo(self: *Self, coin_id: []const u8) !types.CoinInfo {
         var url_buf: [512]u8 = undefined;
-        const url = try std.fmt.bufPrint(
+        // Add null terminator by using sentinel-terminated slice
+        const url = try std.fmt.bufPrintZ(
             &url_buf,
-            BASE_URL ++ "/simple/price?ids={s}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_24hr_change=true&include_last_updated_at=true",
+            "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={s}",
             .{coin_id},
         );
 
         var response = std.ArrayList(u8).init(self.allocator);
         defer response.deinit();
 
-        try self.makeRequest(url, &response);
-
-        // Check if response is empty
-        if (response.items.len == 0) {
-            return error.EmptyResponse;
-        }
-
-        return try json.parseMarketData(self.allocator, response.items, coin_id);
-    }
-
-    fn makeRequest(self: *Self, url: []const u8, response: *std.ArrayList(u8)) !void {
         // Reset CURL handle
         c.curl_easy_reset(self.curl);
 
-        // Set options
-        _ = c.curl_easy_setopt(self.curl, c.CURLOPT_URL, url.ptr);
-        _ = c.curl_easy_setopt(self.curl, c.CURLOPT_HTTPHEADER, self.headers);
-        _ = c.curl_easy_setopt(self.curl, c.CURLOPT_WRITEFUNCTION, writeCallback);
-        _ = c.curl_easy_setopt(self.curl, c.CURLOPT_WRITEDATA, response);
+        // Set request options with the null-terminated string
+        if (c.curl_easy_setopt(self.curl, c.CURLOPT_URL, @as([*:0]const u8, url.ptr)) != c.CURLE_OK) return ApiError.CurlSetupFailed;
+        if (c.curl_easy_setopt(self.curl, c.CURLOPT_HTTPHEADER, self.headers) != c.CURLE_OK) return ApiError.CurlSetupFailed;
+        if (c.curl_easy_setopt(self.curl, c.CURLOPT_WRITEFUNCTION, writeCallback) != c.CURLE_OK) return ApiError.CurlSetupFailed;
+        if (c.curl_easy_setopt(self.curl, c.CURLOPT_WRITEDATA, &response) != c.CURLE_OK) return ApiError.CurlSetupFailed;
 
+        // Perform request
         const result = c.curl_easy_perform(self.curl);
         if (result != c.CURLE_OK) {
-            return error.RequestFailed;
+            std.debug.print("CURL error: {s}\n", .{c.curl_easy_strerror(result)});
+            return ApiError.RequestFailed;
         }
 
         // Check HTTP status code
@@ -80,11 +86,20 @@ pub const ApiClient = struct {
         _ = c.curl_easy_getinfo(self.curl, c.CURLINFO_RESPONSE_CODE, &status_code);
 
         switch (status_code) {
-            200 => {}, // OK
-            429 => return error.RateLimitExceeded,
-            404 => return error.CoinNotFound,
-            else => return error.RequestFailed,
+            200 => {},
+            404 => return ApiError.CoinNotFound,
+            429 => return ApiError.RateLimitExceeded,
+            else => {
+                std.debug.print("HTTP error: {d}\n", .{status_code});
+                return ApiError.RequestFailed;
+            },
         }
+
+        if (response.items.len == 0) {
+            return ApiError.EmptyResponse;
+        }
+
+        return try json.parseMarketData(self.allocator, response.items);
     }
 };
 

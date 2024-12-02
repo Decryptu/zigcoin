@@ -1,58 +1,82 @@
+// json.zig
 const std = @import("std");
 const types = @import("types.zig");
 
-pub fn parseMarketData(allocator: std.mem.Allocator, json_data: []const u8, coin_id: []const u8) !types.CoinInfo {
+pub const JsonError = error{
+    InvalidResponse,
+    CoinNotFound,
+    MissingField,
+    InvalidFieldType,
+    EmptyArray,
+};
+
+pub fn parseMarketData(allocator: std.mem.Allocator, json_data: []const u8) !types.CoinInfo {
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_data, .{});
     defer parsed.deinit();
 
     const root = parsed.value;
-    if (root != .object) return error.InvalidResponse;
 
-    const market_data = root.object;
-    const data = market_data.get(coin_id) orelse return error.CoinNotFound;
-    if (data != .object) return error.InvalidResponse;
+    // Check if root is an array
+    if (root != .array) return JsonError.InvalidResponse;
+    if (root.array.items.len == 0) return JsonError.EmptyArray;
 
-    const coin_data = data.object;
+    // Get the first item since we're only requesting one coin
+    const coin_data = root.array.items[0];
+    if (coin_data != .object) return JsonError.InvalidResponse;
 
-    // Helper function for safe number extraction
-    const getNumber = struct {
-        fn float(obj: std.json.ObjectMap, field: []const u8) ?f64 {
-            if (obj.get(field)) |value| {
-                return switch (value) {
-                    .float => |f| f,
-                    .integer => |i| @as(f64, @floatFromInt(i)),
-                    else => null,
-                };
-            }
-            return null;
+    const coin_obj = coin_data.object;
+
+    // Helper function for safe value extraction
+    const helpers = struct {
+        fn getString(object: std.json.ObjectMap, key: []const u8) ![]const u8 {
+            const val = object.get(key) orelse return JsonError.MissingField;
+            return switch (val) {
+                .string => |s| s,
+                else => JsonError.InvalidFieldType,
+            };
+        }
+
+        fn getFloat(object: std.json.ObjectMap, key: []const u8) !?f64 {
+            const val = object.get(key) orelse return null;
+            return switch (val) {
+                .float => |f| f,
+                .integer => |i| @floatFromInt(i),
+                .null => null,
+                else => JsonError.InvalidFieldType,
+            };
+        }
+
+        fn getOptionalInt(object: std.json.ObjectMap, key: []const u8) !?i64 {
+            const val = object.get(key) orelse return null;
+            return switch (val) {
+                .integer => |i| i,
+                .float => |f| @intFromFloat(f),
+                .null => null,
+                else => null,
+            };
         }
     };
 
-    // Extract direct USD price
-    const usd_data = coin_data.get("usd") orelse return error.InvalidResponse;
-    const current_price = switch (usd_data) {
-        .float => |f| f,
-        .integer => |i| @as(f64, @floatFromInt(i)),
-        else => return error.InvalidResponse,
+    // Build CoinInfo struct
+    const coin_info = types.CoinInfo{
+        .id = try allocator.dupe(u8, try helpers.getString(coin_obj, "id")),
+        .symbol = try allocator.dupe(u8, try helpers.getString(coin_obj, "symbol")),
+        .name = try allocator.dupe(u8, try helpers.getString(coin_obj, "name")),
+        .current_price = (try helpers.getFloat(coin_obj, "current_price")) orelse 0,
+        .market_cap = (try helpers.getFloat(coin_obj, "market_cap")) orelse 0,
+        .market_cap_rank = try helpers.getOptionalInt(coin_obj, "market_cap_rank"),
+        .total_volume = (try helpers.getFloat(coin_obj, "total_volume")) orelse 0,
+        .high_24h = try helpers.getFloat(coin_obj, "high_24h"),
+        .low_24h = try helpers.getFloat(coin_obj, "low_24h"),
+        .price_change_24h = try helpers.getFloat(coin_obj, "price_change_24h"),
+        .price_change_percentage_24h = try helpers.getFloat(coin_obj, "price_change_percentage_24h"),
+        .market_cap_change_24h = try helpers.getFloat(coin_obj, "market_cap_change_24h"),
+        .market_cap_change_percentage_24h = try helpers.getFloat(coin_obj, "market_cap_change_percentage_24h"),
+        .circulating_supply = try helpers.getFloat(coin_obj, "circulating_supply"),
+        .total_supply = try helpers.getFloat(coin_obj, "total_supply"),
+        .max_supply = try helpers.getFloat(coin_obj, "max_supply"),
+        .last_updated = try allocator.dupe(u8, try helpers.getString(coin_obj, "last_updated")),
     };
 
-    return types.CoinInfo{
-        .id = try allocator.dupe(u8, coin_id),
-        .symbol = try allocator.dupe(u8, coin_id),
-        .name = try allocator.dupe(u8, coin_id),
-        .current_price = current_price,
-        .market_cap = getNumber.float(coin_data, "usd_market_cap") orelse 0,
-        .market_cap_rank = null, // Not available in simple price endpoint
-        .total_volume = getNumber.float(coin_data, "usd_24h_vol") orelse 0,
-        .high_24h = null, // Not available in simple price endpoint
-        .low_24h = null, // Not available in simple price endpoint
-        .price_change_24h = null,
-        .price_change_percentage_24h = getNumber.float(coin_data, "usd_24h_change"),
-        .market_cap_change_24h = null,
-        .market_cap_change_percentage_24h = null,
-        .circulating_supply = null, // Not available in simple price endpoint
-        .total_supply = null, // Not available in simple price endpoint
-        .max_supply = null, // Not available in simple price endpoint
-        .last_updated = try allocator.dupe(u8, "N/A"),
-    };
+    return coin_info;
 }

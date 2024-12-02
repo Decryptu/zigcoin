@@ -13,7 +13,10 @@ pub fn main() !void {
     const stdout = stdout_file.writer();
 
     // Initialize API client
-    var client = try api.ApiClient.init(allocator);
+    var client = api.ApiClient.init(allocator) catch |err| {
+        try stdout.print("Failed to initialize API client: {any}\n", .{err});
+        return err;
+    };
     defer client.deinit();
 
     // Get command line arguments
@@ -30,7 +33,15 @@ pub fn main() !void {
     };
 
     // Fetch and display coin information
-    const coin_info = try client.fetchCoinInfo(coin_id);
+    const coin_info = client.fetchCoinInfo(coin_id) catch |err| {
+        switch (err) {
+            error.CoinNotFound => try stdout.print("Error: Coin '{s}' not found\n", .{coin_id}),
+            error.RateLimitExceeded => try stdout.writeAll("Error: Rate limit exceeded. Please try again later\n"),
+            error.RequestFailed => try stdout.writeAll("Error: Failed to fetch data from CoinGecko API\n"),
+            else => try stdout.print("Error: {any}\n", .{err}),
+        }
+        return err;
+    };
     defer coin_info.deinit(allocator);
 
     try display.displayCoinInfo(allocator, stdout, coin_info);

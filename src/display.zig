@@ -2,7 +2,6 @@ const std = @import("std");
 const types = @import("types.zig");
 
 pub fn displayCoinInfo(allocator: std.mem.Allocator, writer: anytype, coin: types.CoinInfo) !void {
-    // Create separator line based on name length
     const separator = try createSeparator(allocator, coin.name.len);
     defer allocator.free(separator);
 
@@ -11,8 +10,8 @@ pub fn displayCoinInfo(allocator: std.mem.Allocator, writer: anytype, coin: type
         \\{s} ({s})
         \\{s}
         \\Price: ${d:.2}
-        \\Market Cap: ${d:.2}
-        \\24h Volume: ${d:.2}
+        \\Market Cap: ${d:.0}
+        \\24h Volume: ${d:.0}
         \\24h Change: {?d:.2}%
         \\Market Cap Rank: {?d}
         \\
@@ -28,7 +27,7 @@ pub fn displayCoinInfo(allocator: std.mem.Allocator, writer: anytype, coin: type
         coin.name,
         coin.symbol,
         separator,
-        coin.current_price,
+        @round(coin.current_price * 100) / 100, // Format price with 2 decimal places
         coin.market_cap,
         coin.total_volume,
         coin.price_change_percentage_24h,

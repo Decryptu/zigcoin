@@ -1,4 +1,3 @@
-// json.zig
 const std = @import("std");
 const types = @import("types.zig");
 
@@ -8,6 +7,7 @@ pub const JsonError = error{
     MissingField,
     InvalidFieldType,
     EmptyArray,
+    NoDataFound,
 };
 
 pub fn parseMarketData(allocator: std.mem.Allocator, json_data: []const u8) !types.CoinInfo {
@@ -16,9 +16,10 @@ pub fn parseMarketData(allocator: std.mem.Allocator, json_data: []const u8) !typ
 
     const root = parsed.value;
 
-    // Check if root is an array
     if (root != .array) return JsonError.InvalidResponse;
-    if (root.array.items.len == 0) return JsonError.EmptyArray;
+
+    // Empty array means coin was not found
+    if (root.array.items.len == 0) return JsonError.NoDataFound;
 
     // Get the first item since we're only requesting one coin
     const coin_data = root.array.items[0];
